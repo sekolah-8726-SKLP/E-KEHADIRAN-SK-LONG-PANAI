@@ -8,7 +8,8 @@ interface Props {
 }
 
 export const AttendanceList: React.FC<Props> = ({ students, record, onSave }) => {
-  const [selectedClass, setSelectedClass] = useState<string>('Semua Kelas');
+  // Lalai kepada string kosong supaya guru perlu memilih kelas dahulu
+  const [selectedClass, setSelectedClass] = useState<string>('');
   
   // Local state to store changes before submitting
   const [localRecords, setLocalRecords] = useState<{ [key: string]: { status: AttendanceStatus; remarks?: string } }>({});
@@ -26,17 +27,18 @@ export const AttendanceList: React.FC<Props> = ({ students, record, onSave }) =>
 
   // Reset filter when student list changes
   useEffect(() => {
-    setSelectedClass('Semua Kelas');
+    setSelectedClass('');
   }, [students]);
 
   // Dapatkan senarai kelas yang unik
   const classList = useMemo(() => {
     const classes = new Set(students.map(s => s.className));
-    return ['Semua Kelas', ...Array.from(classes).sort()];
+    return Array.from(classes).sort();
   }, [students]);
 
   // Tapis pelajar
   const filteredStudents = useMemo(() => {
+    if (!selectedClass) return []; // Jika tiada kelas dipilih, pulangkan kosong
     if (selectedClass === 'Semua Kelas') return students;
     return students.filter(student => student.className === selectedClass);
   }, [students, selectedClass]);
@@ -141,111 +143,131 @@ export const AttendanceList: React.FC<Props> = ({ students, record, onSave }) =>
           <select
             value={selectedClass}
             onChange={(e) => setSelectedClass(e.target.value)}
-            className="flex-1 sm:w-48 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block p-2.5"
+            className="flex-1 sm:w-64 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block p-2.5 font-medium"
           >
+            <option value="" disabled>-- Sila Pilih Kelas (Wajib) --</option>
+            <option value="Semua Kelas">Semua Kelas</option>
             {classList.map((cls) => (
               <option key={cls} value={cls}>{cls}</option>
             ))}
           </select>
         </div>
 
-        {/* Butang Tanda Semua */}
-        <button
-          onClick={handleMarkAllPresent}
-          className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-2.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 active:scale-95 transition-all shadow-sm font-medium text-sm"
-        >
-          <span className="material-symbols-outlined text-[20px]">done_all</span>
-          {selectedClass === 'Semua Kelas' ? 'Tanda Semua Hadir' : 'Tanda Kelas Hadir'}
-        </button>
-      </div>
-
-      <div className="bg-white dark:bg-gray-800 shadow-sm border border-gray-200 dark:border-gray-700 rounded-2xl overflow-hidden flex flex-col h-full">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-gray-50 dark:bg-gray-700/50 border-b border-gray-200 dark:border-gray-700">
-                <th className="p-4 font-semibold text-gray-600 dark:text-gray-300 text-sm w-16 text-center">#</th>
-                <th className="p-4 font-semibold text-gray-600 dark:text-gray-300 text-sm">Nama Murid</th>
-                <th className="p-4 font-semibold text-gray-600 dark:text-gray-300 text-sm w-32">Kelas</th>
-                <th className="p-4 font-semibold text-gray-600 dark:text-gray-300 text-sm text-center min-w-[320px]">Status Kehadiran</th>
-                <th className="p-4 font-semibold text-gray-600 dark:text-gray-300 text-sm">Catatan</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-              {filteredStudents.map((student, index) => {
-                const currentStatus = localRecords[student.id]?.status;
-                const currentRemarks = localRecords[student.id]?.remarks || '';
-
-                return (
-                  <tr key={student.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
-                    <td className="p-4 text-center text-gray-500 dark:text-gray-400 font-medium">{index + 1}</td>
-                    <td className="p-4">
-                      <div className="font-medium text-gray-900 dark:text-white">{student.name}</div>
-                    </td>
-                    <td className="p-4 text-gray-500 dark:text-gray-400 text-sm">
-                      <span className="px-2 py-1 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 border border-indigo-100 dark:border-indigo-800 rounded text-xs font-bold whitespace-nowrap">
-                        {student.className}
-                      </span>
-                    </td>
-                    <td className="p-4">
-                      <div className="flex gap-2 justify-center">
-                        {[AttendanceStatus.PRESENT, AttendanceStatus.ABSENT, AttendanceStatus.LATE, AttendanceStatus.EXCUSED].map((status) => (
-                          <button
-                            key={status}
-                            onClick={() => handleLocalStatusUpdate(student.id, status)}
-                            className={getStatusColor(currentStatus, status)}
-                            title={status}
-                          >
-                            <span className="material-symbols-outlined text-[18px]">
-                              {status === AttendanceStatus.PRESENT ? 'check' : 
-                               status === AttendanceStatus.ABSENT ? 'close' : 
-                               status === AttendanceStatus.LATE ? 'schedule' : 'assignment'}
-                            </span>
-                          </button>
-                        ))}
-                      </div>
-                    </td>
-                    <td className="p-4">
-                      <input
-                        type="text"
-                        placeholder="..."
-                        value={currentRemarks}
-                        onChange={(e) => handleLocalRemarksUpdate(student.id, e.target.value)}
-                        className="w-full bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none transition-all text-gray-700 dark:text-white placeholder-gray-400 dark:placeholder-gray-500"
-                      />
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-        
-        {filteredStudents.length === 0 && (
-           <div className="p-12 text-center text-gray-500 dark:text-gray-400">
-              <span className="material-symbols-outlined text-4xl mb-2 text-gray-300 dark:text-gray-600">group_off</span>
-              <p>Tiada murid dijumpai untuk kelas ini.</p>
-           </div>
+        {/* Butang Tanda Semua - Hanya tunjuk jika kelas dipilih */}
+        {selectedClass && (
+          <button
+            onClick={handleMarkAllPresent}
+            className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-2.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 active:scale-95 transition-all shadow-sm font-medium text-sm animate-[fadeIn_0.3s]"
+          >
+            <span className="material-symbols-outlined text-[20px]">done_all</span>
+            {selectedClass === 'Semua Kelas' ? 'Tanda Semua Hadir' : 'Tanda Kelas Hadir'}
+          </button>
         )}
-
-        {/* Action Buttons */}
-        <div className="p-4 bg-gray-50 dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-3 sticky bottom-0 z-10 shadow-inner">
-            <button
-                onClick={handleReset}
-                className="flex items-center gap-2 px-5 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-600 hover:text-red-600 transition-colors font-medium shadow-sm"
-            >
-                <span className="material-symbols-outlined text-[20px]">restart_alt</span>
-                Reset
-            </button>
-            <button
-                onClick={handleSubmit}
-                className="flex items-center gap-2 px-6 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 hover:shadow-lg transition-all font-medium shadow-md"
-            >
-                <span className="material-symbols-outlined text-[20px]">send</span>
-                Hantar / Simpan
-            </button>
-        </div>
       </div>
+
+      {/* Logic Paparan */}
+      {!selectedClass ? (
+        // STATE: TIADA KELAS DIPILIH
+        <div className="bg-white dark:bg-gray-800 p-12 text-center rounded-2xl border border-dashed border-gray-300 dark:border-gray-700 animate-[fadeIn_0.5s]">
+           <div className="inline-flex items-center justify-center w-20 h-20 bg-indigo-50 dark:bg-indigo-900/30 rounded-full mb-6">
+              <span className="material-symbols-outlined text-4xl text-indigo-500 dark:text-indigo-400">school</span>
+           </div>
+           <h3 className="text-xl font-bold text-gray-800 dark:text-white mb-2">Pilih Kelas Untuk Memulakan</h3>
+           <p className="text-gray-500 dark:text-gray-400 max-w-md mx-auto">
+             Sila pilih kelas dari menu di atas untuk memaparkan senarai murid dan mengisi kehadiran.
+           </p>
+        </div>
+      ) : (
+        // STATE: SENARAI MURID DIPAPARKAN
+        <div className="bg-white dark:bg-gray-800 shadow-sm border border-gray-200 dark:border-gray-700 rounded-2xl overflow-hidden flex flex-col h-full animate-[fadeIn_0.5s]">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-gray-50 dark:bg-gray-700/50 border-b border-gray-200 dark:border-gray-700">
+                  <th className="p-4 font-semibold text-gray-600 dark:text-gray-300 text-sm w-16 text-center">#</th>
+                  <th className="p-4 font-semibold text-gray-600 dark:text-gray-300 text-sm">Nama Murid</th>
+                  <th className="p-4 font-semibold text-gray-600 dark:text-gray-300 text-sm w-32">Kelas</th>
+                  <th className="p-4 font-semibold text-gray-600 dark:text-gray-300 text-sm text-center min-w-[320px]">Status Kehadiran</th>
+                  <th className="p-4 font-semibold text-gray-600 dark:text-gray-300 text-sm">Catatan</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                {filteredStudents.map((student, index) => {
+                  const currentStatus = localRecords[student.id]?.status;
+                  const currentRemarks = localRecords[student.id]?.remarks || '';
+
+                  return (
+                    <tr key={student.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                      <td className="p-4 text-center text-gray-500 dark:text-gray-400 font-medium">{index + 1}</td>
+                      <td className="p-4">
+                        <div className="font-medium text-gray-900 dark:text-white">{student.name}</div>
+                      </td>
+                      <td className="p-4 text-gray-500 dark:text-gray-400 text-sm">
+                        <span className="px-2 py-1 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 border border-indigo-100 dark:border-indigo-800 rounded text-xs font-bold whitespace-nowrap">
+                          {student.className}
+                        </span>
+                      </td>
+                      <td className="p-4">
+                        <div className="flex gap-2 justify-center">
+                          {[AttendanceStatus.PRESENT, AttendanceStatus.ABSENT, AttendanceStatus.LATE, AttendanceStatus.EXCUSED].map((status) => (
+                            <button
+                              key={status}
+                              onClick={() => handleLocalStatusUpdate(student.id, status)}
+                              className={getStatusColor(currentStatus, status)}
+                              title={status}
+                            >
+                              <span className="material-symbols-outlined text-[18px]">
+                                {status === AttendanceStatus.PRESENT ? 'check' : 
+                                 status === AttendanceStatus.ABSENT ? 'close' : 
+                                 status === AttendanceStatus.LATE ? 'schedule' : 'assignment'}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      </td>
+                      <td className="p-4">
+                        <input
+                          type="text"
+                          placeholder="..."
+                          value={currentRemarks}
+                          onChange={(e) => handleLocalRemarksUpdate(student.id, e.target.value)}
+                          className="w-full bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none transition-all text-gray-700 dark:text-white placeholder-gray-400 dark:placeholder-gray-500"
+                        />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          
+          {filteredStudents.length === 0 && (
+             <div className="p-12 text-center text-gray-500 dark:text-gray-400">
+                <span className="material-symbols-outlined text-4xl mb-2 text-gray-300 dark:text-gray-600">group_off</span>
+                <p>Tiada murid dijumpai untuk kelas ini.</p>
+             </div>
+          )}
+
+          {/* Action Buttons */}
+          <div className="p-4 bg-gray-50 dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-3 sticky bottom-0 z-10 shadow-inner">
+              <button
+                  onClick={handleReset}
+                  className="flex items-center gap-2 px-5 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-600 hover:text-red-600 transition-colors font-medium shadow-sm"
+              >
+                  <span className="material-symbols-outlined text-[20px]">restart_alt</span>
+                  Reset
+              </button>
+              <button
+                  onClick={handleSubmit}
+                  className="flex items-center gap-2 px-6 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 hover:shadow-lg transition-all font-medium shadow-md"
+              >
+                  <span className="material-symbols-outlined text-[20px]">send</span>
+                  Hantar / Simpan
+              </button>
+          </div>
+        </div>
+      )}
+      <style>{`@keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }`}</style>
     </div>
   );
 };

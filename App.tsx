@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { AppState, ViewMode, AttendanceStatus, Student, DailyRecord } from './types';
-import { loadState, saveState, exportToCSV, exportToExcel, exportDailyToExcel } from './services/storageService';
+import { loadState, saveState, exportToCSV, exportToExcel, exportDailyToExcel, fetchStudentsFromGoogleSheet } from './services/storageService';
 import { Dashboard } from './components/Dashboard';
 import { AttendanceList } from './components/AttendanceList';
 import { AnalysisReport } from './components/AnalysisReport';
@@ -40,6 +40,24 @@ const App: React.FC = () => {
     return false;
   });
 
+  // Sync Students from Google Sheet on Mount
+  useEffect(() => {
+    const syncStudents = async () => {
+        try {
+            const onlineStudents = await fetchStudentsFromGoogleSheet();
+            if (onlineStudents && onlineStudents.length > 0) {
+                setState(prev => ({
+                    ...prev,
+                    students: onlineStudents
+                }));
+            }
+        } catch (e) {
+            console.error("Auto-sync failed:", e);
+        }
+    };
+    syncStudents();
+  }, []);
+
   // Persist State
   useEffect(() => {
     saveState(state);
@@ -74,6 +92,19 @@ const App: React.FC = () => {
 
   const handleDateChange = (date: string) => {
     setState(prev => ({ ...prev, currentDate: date }));
+  };
+
+  const handleRefreshOnlineData = async () => {
+    const onlineStudents = await fetchStudentsFromGoogleSheet();
+    if (onlineStudents && onlineStudents.length > 0) {
+        setState(prev => ({
+            ...prev,
+            students: onlineStudents
+        }));
+        alert("Data telah dikemaskini.");
+    } else {
+        alert("Gagal mengemaskini data. Sila pastikan Google Sheet boleh diakses.");
+    }
   };
 
   // Batch Update Handler for "Hantar" button
@@ -135,8 +166,8 @@ const App: React.FC = () => {
   };
 
   const handleProcessExport = () => {
+    // 1. Generate Report
     if (exportType === 'DAILY') {
-        // Updated to use Excel
         const record = state.attendanceHistory[state.currentDate];
         if (!record) {
           alert("Tiada data untuk tarikh ini.");
@@ -144,12 +175,21 @@ const App: React.FC = () => {
         }
         exportDailyToExcel(state, state.currentDate);
     } else {
-        // Excel Monthly
         const [year, month] = exportMonth.split('-').map(Number);
         if (!year || !month) return;
         exportToExcel(state, year, month);
     }
+    
+    // 2. Close Modal
     setShowExportModal(false);
+
+    // 3. Prompt user to upload to Drive (Delayed slightly to allow download to start)
+    setTimeout(() => {
+        const driveUrl = "https://drive.google.com/drive/folders/13rh2XlrbA_f8J4tAt_1Vt4dV8I1Af1Tz?usp=drive_link";
+        if (window.confirm("Laporan Excel telah berjaya dijana dan dimuat turun. \n\nAdakah anda mahu membuka Google Drive sekarang untuk memuat naik fail tersebut?")) {
+            window.open(driveUrl, "_blank");
+        }
+    }, 1000);
   };
 
   const handleImportStudents = (newStudents: Student[]) => {
@@ -372,6 +412,8 @@ const App: React.FC = () => {
               onImportStudents={handleImportStudents}
               onImportHistory={handleImportHistory}
               onResetData={handleReset}
+              onRefreshOnlineData={handleRefreshOnlineData}
+              onOpenExport={() => setShowExportModal(true)}
             />
           )}
         </div>

@@ -1,378 +1,112 @@
-import React, { useState, useRef } from 'react';
-import { Student, DailyRecord, AttendanceStatus } from '../types';
-import * as XLSX from 'xlsx';
+import React from 'react';
+import { Student, DailyRecord } from '../types';
 
 interface Props {
   students: Student[];
   onImportStudents: (students: Student[]) => void;
   onImportHistory: (history: { [date: string]: DailyRecord }) => void;
   onResetData: () => void;
+  onRefreshOnlineData: () => void;
+  onOpenExport: () => void; // Added prop to trigger export modal
 }
 
-export const Settings: React.FC<Props> = ({ students, onImportStudents, onImportHistory, onResetData }) => {
-  const [isDragging, setIsDragging] = useState(false);
-  const [importMode, setImportMode] = useState<'STUDENT' | 'HISTORY'>('STUDENT');
-  const [fileName, setFileName] = useState<string | null>(null);
-  const [pendingData, setPendingData] = useState<any | null>(null);
-  const [previewInfo, setPreviewInfo] = useState<string>('');
-  
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // --- Helper: Find key case-insensitive ---
-  const getVal = (row: any, keys: string[]) => {
-    for (const k of keys) {
-      if (row[k] !== undefined) return row[k];
-    }
-    return null;
-  };
-
-  // --- Helper: Parse Status String ---
-  const parseStatus = (val: string): AttendanceStatus => {
-    const v = String(val).toLowerCase().trim();
-    if (v === 'hadir' || v === 'present' || v === '1' || v === '/') return AttendanceStatus.PRESENT;
-    if (v === 'tidak hadir' || v === 'absent' || v === '0' || v === 'x') return AttendanceStatus.ABSENT;
-    if (v === 'lewat' || v === 'late' || v === 'l') return AttendanceStatus.LATE;
-    if (v === 'kenyataan' || v === 'cuti' || v === 'excused') return AttendanceStatus.EXCUSED;
-    return AttendanceStatus.ABSENT; // Default fallback
-  };
-
-  // --- Helper: Excel Date to YYYY-MM-DD ---
-  const parseExcelDate = (val: any): string | null => {
-    if (!val) return null;
-    // Handle Excel Serial Number
-    if (typeof val === 'number') {
-      const date = new Date((val - 25569) * 86400 * 1000);
-      return date.toISOString().split('T')[0];
-    }
-    // Handle String
-    const d = new Date(val);
-    if (!isNaN(d.getTime())) {
-      return d.toISOString().split('T')[0];
-    }
-    return null;
-  };
-
-  // --- Process 1: Analyze Student Data ---
-  const analyzeStudentData = (data: any[]) => {
-    const newStudents: Student[] = [];
-    data.forEach((row, idx) => {
-      if (Object.keys(row).length === 0) return;
-      let name = '';
-      let className = '';
-
-      if (!Array.isArray(row)) {
-        name = getVal(row, ['Nama', 'NAMA', 'Nama Murid', 'Name', 'Student Name', '__EMPTY']) || '';
-        className = getVal(row, ['Kelas', 'KELAS', 'Class', 'Tahun', 'Darjah', '__EMPTY_1']) || '';
-      } else if (Array.isArray(row) && row.length >= 2) {
-         name = row[0];
-         className = row[1];
-      }
-
-      if (name && name !== 'Nama Murid' && name !== 'Name') {
-        newStudents.push({
-          id: `imp-${Date.now()}-${idx}`,
-          name: String(name).trim(),
-          className: String(className).trim()
-        });
-      }
-    });
-
-    if (newStudents.length > 0) {
-      setPendingData(newStudents);
-      setPreviewInfo(`Dijumpai ${newStudents.length} data murid.`);
-    } else {
-      alert("Tiada data murid dijumpai. Pastikan format betul.");
-      setFileName(null);
-    }
-  };
-
-  // --- Process 2: Analyze Attendance History ---
-  const analyzeHistoryData = (data: any[]) => {
-    const newHistory: { [date: string]: DailyRecord } = {};
-    let count = 0;
-
-    data.forEach((row) => {
-      // Expected: Tarikh, Nama, Status, Catatan
-      const dateRaw = getVal(row, ['Tarikh', 'Date', 'DATE', 'TARIKH']);
-      const nameRaw = getVal(row, ['Nama', 'Name', 'NAMA', 'Nama Murid']);
-      const statusRaw = getVal(row, ['Status', 'Kehadiran', 'Hadir']);
-      const remarks = getVal(row, ['Catatan', 'Remarks', 'Sebab']) || '';
-
-      const dateStr = parseExcelDate(dateRaw);
-      
-      if (dateStr && nameRaw) {
-        // Try to match student by Name (Simple fuzzy match: exact trim ignore case)
-        const student = students.find(s => s.name.toLowerCase() === String(nameRaw).toLowerCase().trim());
-        
-        if (student) {
-          if (!newHistory[dateStr]) {
-            newHistory[dateStr] = { date: dateStr, records: {} };
-          }
-          
-          newHistory[dateStr].records[student.id] = {
-            status: parseStatus(statusRaw),
-            timestamp: new Date().toISOString(),
-            remarks: String(remarks)
-          };
-          count++;
-        }
-      }
-    });
-
-    if (count > 0) {
-      setPendingData(newHistory);
-      setPreviewInfo(`Dijumpai ${count} rekod kehadiran yang sah.`);
-    } else {
-      alert("Tiada rekod kehadiran yang sah dijumpai. Pastikan nama murid sepadan dengan senarai dalam sistem.");
-      setFileName(null);
-    }
-  };
-
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    readFile(file);
-  };
-
-  const readFile = (file: File) => {
-    setFileName(file.name);
-    setPendingData(null);
-    setPreviewInfo('');
-    
-    const reader = new FileReader();
-    
-    reader.onload = (evt) => {
-      const bstr = evt.target?.result;
-      if (bstr) {
-        try {
-          const wb = XLSX.read(bstr, { type: 'binary' });
-          const wsname = wb.SheetNames[0];
-          const ws = wb.Sheets[wsname];
-          const data = XLSX.utils.sheet_to_json(ws);
-          
-          if (importMode === 'STUDENT') {
-            analyzeStudentData(data);
-          } else {
-            analyzeHistoryData(data);
-          }
-        } catch (error) {
-          console.error(error);
-          alert("Ralat fail. Sila pastikan format fail .xlsx atau .csv adalah sah.");
-          setFileName(null);
-        }
-      }
-    };
-    reader.readAsBinaryString(file);
-  };
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
-  };
-
-  const handleDragLeave = () => {
-    setIsDragging(false);
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-    const file = e.dataTransfer.files[0];
-    if (file) readFile(file);
-  };
-
-  const handleProceed = () => {
-    if (!pendingData) return;
-
-    if (importMode === 'STUDENT') {
-        if (window.confirm("Adakah anda pasti mahu menggantikan SEMUA data murid sedia ada?")) {
-            onImportStudents(pendingData);
-            // alert removed to allow seamless transition by App.tsx
-        } else {
-            return;
-        }
-    } else {
-        onImportHistory(pendingData);
-        // alert removed
-    }
-    handleCancel();
-  };
-
-  const handleCancel = () => {
-    setFileName(null);
-    setPendingData(null);
-    setPreviewInfo('');
-    if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-    }
-  };
-
-  const downloadStudentTemplate = () => {
-    const ws = XLSX.utils.json_to_sheet([
-      { "Nama Murid": "Ali Bin Abu", "Kelas": "1 Cerdas" },
-      { "Nama Murid": "Siti Nurhaliza", "Kelas": "4 Bestari" },
-    ]);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Templat Murid");
-    XLSX.writeFile(wb, "Templat_Murid.xlsx");
-  };
-
-  const downloadHistoryTemplate = () => {
-    const ws = XLSX.utils.json_to_sheet([
-      { "Tarikh": "2023-10-01", "Nama Murid": "Ali Bin Abu", "Status": "Hadir", "Catatan": "" },
-      { "Tarikh": "2023-10-01", "Nama Murid": "Siti Nurhaliza", "Status": "Tidak Hadir", "Catatan": "Demam" },
-      { "Tarikh": "2023-10-02", "Nama Murid": "Ali Bin Abu", "Status": "Hadir", "Catatan": "" },
-    ]);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Templat Kehadiran");
-    XLSX.writeFile(wb, "Templat_Rekod_Kehadiran.xlsx");
-  };
-
+export const Settings: React.FC<Props> = ({ 
+  students, 
+  onImportStudents, 
+  onImportHistory, 
+  onResetData, 
+  onRefreshOnlineData,
+  onOpenExport 
+}) => {
   return (
     <div className="max-w-4xl mx-auto space-y-8">
       
-      {/* Universal Import Card */}
-      <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700">
-        <h3 className="text-xl font-bold text-gray-800 dark:text-white mb-6 flex items-center gap-2">
-           <span className="material-symbols-outlined text-indigo-600 dark:text-indigo-400">cloud_upload</span>
-           Pusat Import Data
-        </h3>
-
-        {/* Mode Switcher */}
-        <div className="flex bg-gray-100 dark:bg-gray-700 p-1 rounded-xl mb-6 w-full md:w-fit">
-          <button 
-            onClick={() => { setImportMode('STUDENT'); handleCancel(); }}
-            className={`flex-1 px-6 py-2 rounded-lg text-sm font-semibold transition-all ${importMode === 'STUDENT' ? 'bg-white dark:bg-gray-600 text-indigo-600 dark:text-white shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}`}
-          >
-            Senarai Murid
-          </button>
-          <button 
-             onClick={() => { setImportMode('HISTORY'); handleCancel(); }}
-             className={`flex-1 px-6 py-2 rounded-lg text-sm font-semibold transition-all ${importMode === 'HISTORY' ? 'bg-white dark:bg-gray-600 text-indigo-600 dark:text-white shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}`}
-          >
-            Rekod Kehadiran (Analisis)
-          </button>
-        </div>
-        
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {/* Instructions */}
-          <div className="md:col-span-1 space-y-4">
-            <p className="text-gray-600 dark:text-gray-300 text-sm">
-              {importMode === 'STUDENT' 
-                ? 'Muat naik senarai nama murid untuk menetapkan pangkalan data sistem.' 
-                : 'Muat naik rekod kehadiran lampau untuk menjana graf analisis yang lengkap.'}
-            </p>
-            
-            <div className={`p-4 rounded-xl border text-sm ${importMode === 'STUDENT' ? 'bg-indigo-50 dark:bg-indigo-900/30 border-indigo-100 dark:border-indigo-800 text-indigo-800 dark:text-indigo-200' : 'bg-amber-50 dark:bg-amber-900/30 border-amber-100 dark:border-amber-800 text-amber-800 dark:text-amber-200'}`}>
-              <p className="font-semibold mb-2">Format Lajur Wajib:</p>
-              {importMode === 'STUDENT' ? (
-                <ul className="list-disc pl-4 space-y-1">
-                  <li><strong>Nama Murid</strong></li>
-                  <li><strong>Kelas</strong></li>
-                </ul>
-              ) : (
-                <ul className="list-disc pl-4 space-y-1">
-                  <li><strong>Tarikh</strong> (YYYY-MM-DD)</li>
-                  <li><strong>Nama Murid</strong> (Sama dalam sistem)</li>
-                  <li><strong>Status</strong> (Hadir/Tidak/Lewat)</li>
-                </ul>
-              )}
-            </div>
-
-            <button 
-              onClick={importMode === 'STUDENT' ? downloadStudentTemplate : downloadHistoryTemplate}
-              className="w-full py-2 px-4 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-lg text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-600 flex items-center justify-center gap-2 transition-colors"
-            >
-              <span className="material-symbols-outlined text-sm">download</span>
-              Muat Turun Templat
-            </button>
-          </div>
-
-          {/* Dropzone & Actions */}
-          <div className="md:col-span-2 flex flex-col gap-4">
-            
-            {!pendingData ? (
-                <div 
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
-                onClick={() => fileInputRef.current?.click()}
-                className={`flex-1 min-h-[250px] border-2 border-dashed rounded-xl flex flex-col items-center justify-center cursor-pointer transition-all ${
-                    isDragging 
-                    ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30' 
-                    : 'border-gray-300 dark:border-gray-600 hover:border-indigo-400 hover:bg-gray-50 dark:hover:bg-gray-700'
-                }`}
-                >
-                <input 
-                    type="file" 
-                    ref={fileInputRef}
-                    onChange={handleFileUpload}
-                    accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel"
-                    className="hidden"
-                />
-                
-                <div className={`w-16 h-16 rounded-full flex items-center justify-center mb-4 ${importMode === 'STUDENT' ? 'bg-indigo-100 text-indigo-600' : 'bg-amber-100 text-amber-600'}`}>
-                    <span className="material-symbols-outlined text-3xl">
-                    {importMode === 'STUDENT' ? 'person_add' : 'history_edu'}
-                    </span>
-                </div>
-                
-                <div className="text-center px-4">
-                    <p className="text-gray-700 dark:text-gray-300 font-medium">Klik untuk pilih fail atau seret ke sini</p>
-                    <p className="text-gray-400 dark:text-gray-500 text-xs mt-2">Mode: {importMode === 'STUDENT' ? 'Senarai Murid' : 'Rekod Kehadiran'}</p>
-                </div>
-                </div>
-            ) : (
-                <div className="flex-1 min-h-[250px] bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600 rounded-xl flex flex-col items-center justify-center p-6 text-center">
-                    <div className="w-16 h-16 bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded-full flex items-center justify-center mb-4">
-                        <span className="material-symbols-outlined text-3xl">check</span>
-                    </div>
-                    <h4 className="text-gray-800 dark:text-white font-bold text-lg mb-1">{fileName}</h4>
-                    <p className="text-indigo-600 dark:text-indigo-400 font-medium mb-6">{previewInfo}</p>
-                    
-                    <div className="flex gap-3 w-full max-w-xs">
-                         <button 
-                            onClick={handleCancel}
-                            className="flex-1 py-2 px-4 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors font-medium"
-                         >
-                            Batal
-                         </button>
-                         <button 
-                            onClick={handleProceed}
-                            className="flex-1 py-2 px-4 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 shadow-md transition-colors font-medium"
-                         >
-                            Hantar
-                         </button>
-                    </div>
-                </div>
-            )}
-            
-          </div>
-        </div>
-      </div>
-
       {/* Google Sheet Link Info */}
       <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700">
         <h3 className="text-xl font-bold text-gray-800 dark:text-white mb-4 flex items-center gap-2">
            <span className="material-symbols-outlined text-green-600 dark:text-green-400">table_view</span>
-           Eksport Data
+           Kemaskini Data Murid
         </h3>
         <div className="p-4 bg-green-50 dark:bg-green-900/20 text-green-800 dark:text-green-200 rounded-xl mb-6 border border-green-100 dark:border-green-800">
           <p className="text-sm leading-relaxed">
-            Untuk membuat salinan keselamatan atau mengemaskini Google Sheet luaran, sila gunakan fungsi eksport CSV di menu utama.
+            Data murid disegerakkan secara automatik dari Google Sheet. Sila kemas kini senarai nama di Google Sheet terlebih dahulu, kemudian tekan butang "Refresh Data".
           </p>
         </div>
         
-        <div className="flex items-center gap-4 text-sm text-gray-500 dark:text-gray-400">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
+          
+          {/* Button 1: Edit Google Sheet */}
           <a 
-            href="https://docs.google.com/spreadsheets/d/1FIaAoDLh82xhyjMvPWNu8c6J4Yts6qYgf_6ioTZ45gM/edit?gid=0#gid=0" 
+            href="https://docs.google.com/spreadsheets/d/1tdivTIl-QHBJBKq7OCEIurpAQLgRc79M/edit?gid=1355535367#gid=1355535367" 
             target="_blank" 
             rel="noopener noreferrer"
-            className="flex items-center gap-2 text-indigo-600 dark:text-indigo-400 hover:underline font-medium"
+            className="group relative flex items-center justify-center gap-3 px-6 py-3.5 bg-white dark:bg-gray-700 border-2 border-indigo-100 dark:border-indigo-600 text-indigo-700 dark:text-indigo-200 rounded-xl shadow-sm hover:shadow-lg hover:border-indigo-500 dark:hover:border-indigo-400 transition-all duration-300 font-bold uppercase tracking-wide overflow-hidden"
           >
-            Buka Google Sheet Asal
-            <span className="material-symbols-outlined text-sm">open_in_new</span>
+            <div className="absolute inset-0 w-full h-full bg-gradient-to-r from-transparent via-indigo-50/50 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000 ease-in-out"></div>
+            <span className="material-symbols-outlined text-2xl group-hover:scale-110 transition-transform text-green-600">edit_document</span>
+            <span className="relative z-10">Kemas Kini Senarai Nama</span>
+            <span className="material-symbols-outlined text-sm opacity-50 group-hover:translate-x-1 transition-transform">open_in_new</span>
           </a>
+
+           {/* Button 2: Refresh Data */}
+           <button
+            onClick={onRefreshOnlineData}
+            className="group relative flex items-center justify-center gap-3 px-6 py-3.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white rounded-xl shadow-md hover:shadow-xl hover:-translate-y-0.5 active:translate-y-0 active:shadow-md transition-all duration-200 font-bold uppercase tracking-wide"
+          >
+            <span className="material-symbols-outlined text-2xl group-hover:rotate-180 transition-transform duration-500">sync</span>
+            <span>Refresh Data</span>
+          </button>
+
+        </div>
+      </div>
+
+      {/* Cloud Export Section */}
+      <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 relative overflow-hidden">
+         <div className="absolute top-0 right-0 p-8 opacity-5">
+            <span className="material-symbols-outlined text-9xl">cloud_sync</span>
+         </div>
+         
+         <h3 className="text-xl font-bold text-gray-800 dark:text-white mb-4 flex items-center gap-2 relative z-10">
+           <span className="material-symbols-outlined text-blue-600 dark:text-blue-400">folder_shared</span>
+           Analisis Pukal & Simpanan Awan
+        </h3>
+
+        <div className="relative z-10">
+            <p className="text-gray-600 dark:text-gray-300 mb-6 max-w-2xl">
+                Jana laporan analisis kehadiran penuh (Harian, Bulanan, atau Tahunan) dalam format Excel dan simpan ke dalam Google Drive sekolah untuk rekod kekal.
+            </p>
+
+            <div className="flex flex-col md:flex-row gap-4">
+                {/* Step 1: Generate */}
+                <button 
+                    onClick={onOpenExport}
+                    className="flex-1 flex items-center justify-center gap-3 px-6 py-4 bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-200 dark:border-indigo-700 text-indigo-700 dark:text-indigo-300 rounded-xl hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-all font-semibold shadow-sm"
+                >
+                    <span className="material-symbols-outlined text-3xl">download</span>
+                    <div className="text-left">
+                        <span className="block text-xs uppercase tracking-wider opacity-70">Langkah 1</span>
+                        <span className="block text-lg">Jana Laporan Excel</span>
+                    </div>
+                </button>
+
+                {/* Step 2: Upload to Drive */}
+                <a 
+                    href="https://drive.google.com/drive/folders/13rh2XlrbA_f8J4tAt_1Vt4dV8I1Af1Tz?usp=drive_link"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-[1.5] flex items-center justify-center gap-3 px-6 py-4 bg-gradient-to-r from-blue-600 to-cyan-600 text-white rounded-xl hover:from-blue-700 hover:to-cyan-700 shadow-lg hover:shadow-blue-500/30 hover:-translate-y-0.5 transition-all font-bold"
+                >
+                    <span className="material-symbols-outlined text-3xl">add_to_drive</span>
+                    <div className="text-left">
+                        <span className="block text-xs uppercase tracking-wider opacity-80">Langkah 2</span>
+                        <span className="block text-lg">Buka Folder Google Drive</span>
+                    </div>
+                    <span className="material-symbols-outlined ml-auto opacity-50">open_in_new</span>
+                </a>
+            </div>
+            <p className="mt-3 text-xs text-gray-400 dark:text-gray-500 italic">
+                *Nota: Sila muat naik fail Excel yang dijana ke dalam folder Google Drive yang dibuka.
+            </p>
         </div>
       </div>
 
